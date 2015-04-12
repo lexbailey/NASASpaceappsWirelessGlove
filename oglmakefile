@@ -1,0 +1,11 @@
+LIBS = -lfreeglut  -lGLU32 -lopengl32 -lm
+
+%.exe: %.c
+	gcc $^ -o $@ ${LIBS}
+
+%.o: %.c %.h
+	gcc $< -c -o $@ ${LIBS} 
+
+
+gears.exe: gears.c 
+	gcc $^ -o $@ ${LIBS}

@@ -6,14 +6,33 @@
 #include "gears.h"
 
 #define SENSITIVITY 360.0f
-#define ZOOMMULTIPLIER 1.0f
+#define ZOOMMULTIPLIER 0.05f
+#define PANSENSITIVITY 5.0f
 
-#include <sys/time.h>
-long int getTimeMS(){
-	struct timeval t;
-	gettimeofday(&t, NULL);
-	return (t.tv_sec * 1000)+(t.tv_usec / 1000);
-}
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
+#include <Windows.h>
+	
+	long int getTimeMS(){
+		 static LARGE_INTEGER s_frequency;
+	    static BOOL s_use_qpc = QueryPerformanceFrequency(&s_frequency);
+	    if (s_use_qpc) {
+	        LARGE_INTEGER now;
+	        QueryPerformanceCounter(&now);
+	        return (1000LL * now.QuadPart) / s_frequency.QuadPart;
+	    } else {
+	        return GetTickCount();
+	    }
+	}
+
+#else
+
+	long int getTimeMS(){
+		struct timeval t;
+		gettimeofday(&t, NULL);
+		return (t.tv_sec * 1000)+(t.tv_usec / 1000);
+	}
+#endif
+
 
 //#include "model.h"
 
@@ -25,7 +44,8 @@ int width = 800;
 int height = 600;
 
 long int lastRender;
-long int firstRender;
+
+
 
 float randRange(float min, float max){
 	float range = max - min;
@@ -124,34 +144,8 @@ loopfunc otherloop;
 
 float zoom;
 
+float panx,pany,panz;
 float rotx, roty, rotz;
-float panx, pany, panz;
-
-GLfloat difLight[] = {0.8f,0.8f,0.8f,1.0f};
-GLfloat difLightPos[] = {4.8f,0.0f,0.0f};
-GLfloat ambLight[] = {0.1f,0.1f,0.1f,1.0f};
-GLfloat ambLightPos[] = {4.8f,5.0f,0.0f};
-GLfloat speLight[] = {0.2f,0.2f,0.2f,1.0f};
-GLfloat speLightPos[] = {-4.8f,0.0f,0.0f};
-
-void glLights(){
-	glEnable(GL_LIGHTING);
-	glEnable(GL_LIGHT0);
-	glEnable(GL_LIGHT1);
-	glEnable(GL_LIGHT2);
-	glEnable(GL_COLOR_MATERIAL);
-
-	glShadeModel(GL_SMOOTH);
-
-	glLightfv(GL_LIGHT0, GL_DIFFUSE, difLight);
-	glLightfv(GL_LIGHT0, GL_POSITION, difLightPos);
-
-	glLightfv(GL_LIGHT1, GL_AMBIENT, ambLight);
-	glLightfv(GL_LIGHT1, GL_POSITION, ambLightPos);
-
-	glLightfv(GL_LIGHT2, GL_SPECULAR, speLight);
-	glLightfv(GL_LIGHT2, GL_POSITION, speLightPos);
-}
 
 void render(){
 
@@ -161,24 +155,48 @@ void render(){
 	printf("FPS: %.1f      \r", 1.0f/time_delta); fflush(stdout);
 	time_delta *= 6.0f;
 	lastRender = thisRender;
+	angle1s += time_delta*8.0f;
 
-	angle1s += (8.0f * time_delta);
 
 	glLoadIdentity();
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
+
+	glEnable(GL_LIGHTING);
+	glEnable(GL_LIGHT0);
+	glEnable(GL_LIGHT1);
+	glEnable(GL_LIGHT2);
+	glEnable(GL_COLOR_MATERIAL);
+
+	glShadeModel(GL_SMOOTH);
+
+	GLfloat difLight[] = {0.8f,0.8f,0.8f,1.0f};
+	GLfloat difLightPos[] = {4.8f,0.0f,0.0f};
+	glLightfv(GL_LIGHT0, GL_DIFFUSE, difLight);
+	glLightfv(GL_LIGHT0, GL_POSITION, difLightPos);
+
+
+	GLfloat ambLight[] = {0.1f,0.1f,0.1f,1.0f};
+	GLfloat ambLightPos[] = {4.8f,5.0f,0.0f};
+	glLightfv(GL_LIGHT1, GL_AMBIENT, ambLight);
+	glLightfv(GL_LIGHT1, GL_POSITION, ambLightPos);
+
+	GLfloat speLight[] = {0.2f,0.2f,0.2f,1.0f};
+	GLfloat speLightPos[] = {-4.8f,0.0f,0.0f};
+	glLightfv(GL_LIGHT2, GL_SPECULAR, speLight);
+	glLightfv(GL_LIGHT2, GL_POSITION, speLightPos);
+
+
 	glTranslatef(0.0f, -1.0f, -10.0f);
-
-	glTranslatef(panx, pany, panz);
-
 	glRotatef(30.0f, 0.0f, 0.0f, 1.0f);
 
-	glScalef(zoom, zoom, zoom);
-
+	glTranslatef(panx*PANSENSITIVITY,pany*PANSENSITIVITY,panz*PANSENSITIVITY);
 	glRotatef(rotx * SENSITIVITY, 1.0f, 0.0f, 0.0f);
 	glRotatef(roty * SENSITIVITY, 0.0f, 1.0f, 0.0f);
 	glRotatef(rotz * SENSITIVITY, 0.0f, 0.0f, 1.0f);
+
+	glScalef(zoom, zoom, zoom);
 
 	glPushMatrix();
 	glTranslatef(0.0f,0.0f,0.0f);
@@ -201,15 +219,19 @@ void render(){
 	drawGear(5, 0.6f, 0.8f, 1.0f);
 	glPopMatrix();
 
+	//glutSolidTeapot(3.0f);
+
 	glutSwapBuffers();
-
-
-	//setRotation(x, y, z);
-	//setZoom(1.0f + ((thisRender-firstRender)*(-0.0001)));
-	setPan(((thisRender-firstRender)*0.001), 0,0);
 
 	otherloop();
 
+}
+
+void setPan(float x, float y, float z){
+	printf("Panning by %.2f,%.2f,%.2f\n",x,y,z);
+	panx = x;
+	pany = y;
+	panz = z;
 }
 
 void resize(int width_v, int height_v){
@@ -235,14 +257,10 @@ void setOtherLoop(loopfunc f){
 	otherloop = f;
 }
 
-void setZoom(int amount){
-	printf("Zoom by %d\n",-amount);
-	zoom += ZOOMMULTIPLIER*-amount;
-	printf("Zoom is now %.1f\n",zoom);
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
-	gluPerspective(60.0f+zoom, (float)width/(float)height, 0.01f, 100.0f);
-	glMatrixMode(GL_MODELVIEW);
+void setZoom(float amount){
+	printf("Zoom by %d\n",amount);
+	zoom += ZOOMMULTIPLIER*amount;
+	printf("Zoom is now %.2f\n",zoom);
 }
 
 void setRotation(float x, float y, float z){
@@ -251,18 +269,11 @@ void setRotation(float x, float y, float z){
 	rotz = z;
 }
 
-void setZoom(float z){
-	zoom = z;
-}
-
-void setPan(float x, float y, float z){
-	panx = x;
-	pany = y;
-	panz = z;
-}
-
 int glMain(int argc, char **argv){
 	zoom = 1.0f;
+	panx = 0.0f;
+	pany = 0.0f;
+	panz = 0.0f;
 	glutInit(&argc, argv);
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_DEPTH);
 	glutInitWindowSize(width,height);
@@ -275,11 +286,7 @@ int glMain(int argc, char **argv){
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LEQUAL);
 
-	glLights();
-
 	lastRender = getTimeMS();
-	firstRender = getTimeMS();
-
 	glutMainLoop();
 	return 0;
 }

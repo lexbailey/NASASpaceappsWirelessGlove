@@ -1,14 +1,16 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include "rs232.h"
 #include "gears.h"
+#include <math.h>
 
 #ifndef GLOVETOLERANCE
 #define GLOVETOLERANCE 0.2f
 #endif
 
-
+#define MAXQUEUESIZE 10
 #define COMPORT 9
+
+#define min(x,y) ((x)>(y)?(y):(x))
+#define max(x,y) ((x)<(y)?(y):(x))
 
 typedef struct gloveData
 {
@@ -17,9 +19,9 @@ typedef struct gloveData
 	int16_t fing3;
 	int16_t fing4;
 	int16_t fing5;
-	int16_t handGyX;
-	int16_t handGyY;
-	int16_t handGyZ;
+	int16_t handGyX;//pitch
+	int16_t handGyY;//yaw
+	int16_t handGyZ;//roll
 	int16_t handTemp;
 	int16_t handAccX;
 	int16_t handAccY;
@@ -33,20 +35,31 @@ typedef struct gloveData
 	int16_t armAccZ;
 } gloveData_t;
 
-typedef enum 
+
+gloveData_t operator + (gloveData_t a, gloveData_t b)
 {
-	rest, zoom, moves, rotate
-} gloveMode_t;
-
-
-gloveData_t grelax;
-gloveData_t gtense;
-gloveData_t gdiff;
-gloveData_t gd;
-gloveData_t gdnorm;
-gloveData_t gstartstate;
-
-gloveMode_t cMode;
+	gloveData_t result;
+	result.fing1 = a.fing1 + b.fing1;
+	result.fing2 = a.fing2 + b.fing2;
+	result.fing3 = a.fing3 + b.fing3;
+	result.fing4 = a.fing4 + b.fing4;
+	result.fing5 = a.fing5 + b.fing5;
+	result.handGyX = a.handGyX + b.handGyX;
+	result.handGyY = a.handGyY + b.handGyY;
+	result.handGyZ = a.handGyZ + b.handGyZ;
+	result.handTemp = a.handTemp + b.handTemp;
+	result.handAccX = a.handAccX + b.handAccX;
+	result.handAccY = a.handAccY + b.handAccY;
+	result.handAccZ = a.handAccZ + b.handAccZ;
+	result.armGyX = a.armGyX + b.armGyX;
+	result.armGyY = a.armGyY + b.armGyY;
+	result.armGyZ = a.armGyZ + b.armGyZ;
+	result.armTemp = a.armTemp + b.armTemp;
+	result.armAccX = a.armAccX + b.armAccX;
+	result.armAccY = a.armAccY + b.armAccY;
+	result.armAccZ = a.armAccZ + b.armAccZ;
+	return result;
+}
 
 gloveData_t operator - (gloveData_t a, gloveData_t b)
 {
@@ -123,9 +136,80 @@ gloveData_t operator / (gloveData_t a, int16_t b)
 	return result;	
 }
 
+
+
+class glovebuffer
+{
+	private:
+		gloveData_t* gdt;
+		int16_t numDataIn;
+		int16_t maxSize;
+		int16_t index;
+	public:
+		glovebuffer(int i = 5)
+		{
+			index = -1;
+			maxSize = i;
+			gdt = (gloveData_t*)malloc(sizeof(gloveData_t)*i);
+		}
+
+		void add(gloveData_t g)
+		{
+			gdt[++index %=maxSize] = g;
+			numDataIn++;
+		}
+
+		gloveData_t average()
+		{
+			gloveData_t gd;
+			memset(&gd, 0, sizeof(gloveData_t));
+			int i;
+
+			for (int i = 0; i<= min(maxSize, numDataIn)-1; i++){
+				gd = gd+gdt[i];
+			}
+
+			return gd/maxSize;
+
+		}
+};
+
+typedef enum 
+{
+	rest, zoom, move, rotate
+} gloveMode_t;
+
+
+gloveData_t grelax;
+gloveData_t gtense;
+gloveData_t gdiff;
+gloveData_t gd;
+gloveData_t gdnorm;
+gloveData_t gstartstate;
+
+gloveMode_t cMode;
+
+glovebuffer gbuff;
+
+bool parseData(gloveData_t *gd, char* str)
+{
+	int n = sscanf(str, "[%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd]", &(gd->fing1),&(gd->fing2),&(gd->fing3),&(gd->fing4),&(gd->fing5),&(gd->handGyX),&(gd->handGyY),&(gd->handGyZ),&(gd->handTemp),&(gd->handAccX),&(gd->handAccY),&(gd->handAccZ),&(gd->armGyX),&(gd->armGyY),&(gd->armGyZ),&(gd->armTemp),&(gd->armAccX),&(gd->armAccY),&(gd->armAccZ));
+	return n > 0;
+}
+
+void printData(gloveData_t gd){
+
+	printf("%hd, %hd, %hd, %hd, %hd, - , %hd, %hd, %hd\n", gd.fing1, gd.fing2, gd.fing3, gd.fing4, gd.fing5, gd.handGyX, gd.handGyY, gd.handGyZ);
+
+}
+
+
 float lx,ly,lz;
 float sx,sy,sz;
 float x,y,z;
+float px,py,pz;
+float lpx,lpy,lpz;
+float spx,spy,spz;
 
 
 void detectGesture(gloveData_t gnorm, gloveData_t gdiff, gloveData_t *gstartstate){
@@ -141,14 +225,12 @@ void detectGesture(gloveData_t gnorm, gloveData_t gdiff, gloveData_t *gstartstat
 
 	if(cMode == rest){
 		if(f == 0b11111){
-			printf("FISTO!\n");
-			if (cMode != rotate){
-				(*gstartstate) = gnorm;
-				sx = gnorm.handGyX/32768.0f;
-				sy = gnorm.handGyY/32768.0f;
-				sz = gnorm.handGyZ/32768.0f;
-			}
-			printf("%.3f, %.3f, %.3f\n", gnorm.handGyX/32768.0f, gnorm.handGyY/32768.0f, gnorm.handGyZ/32768.0f);
+			printf("Rotation Mode!\n");
+			(*gstartstate) = gnorm;
+			sx = gnorm.handGyX/32768.0f;
+			sy = gnorm.handGyY/32768.0f;
+			sz = gnorm.handGyZ/32768.0f;
+			//printf("%.3f, %.3f, %.3f\n", gnorm.handGyX/32768.0f, gnorm.handGyY/32768.0f, gnorm.handGyZ/32768.0f);
 			
 			cMode = rotate;
 			
@@ -159,7 +241,11 @@ void detectGesture(gloveData_t gnorm, gloveData_t gdiff, gloveData_t *gstartstat
 		}
 		else if(f == 0b10011 ){
 			printf("MOVE!\n");
-			cMode = moves;
+			(*gstartstate) = gnorm;
+			spx = gnorm.handGyX/32768.0f;
+			spy = gnorm.handGyY/32768.0f;
+			spz = gnorm.handGyZ/32768.0f;
+			cMode = move;
 		}
 	}
 	else
@@ -169,6 +255,12 @@ void detectGesture(gloveData_t gnorm, gloveData_t gdiff, gloveData_t *gstartstat
 				lx = x;
 				ly = y;
 				lz = z;
+			}
+			else if(cMode == move)
+			{
+				lpx = px;
+				lpy = py;
+				lpz = pz;
 			}
 			cMode = rest;
 			printf("back to rest\n");
@@ -181,12 +273,14 @@ void detectGesture(gloveData_t gnorm, gloveData_t gdiff, gloveData_t *gstartstat
 
 void doTheThing(void)
 {
+	gbuff.add(gdnorm);
+	gloveData_t gav = gbuff.average();
 	switch(cMode){
 		case rotate:
-			x = lx+((gdnorm.handGyX/32768.0f)-sx);
-			y = ly+((gdnorm.handGyY/32768.0f)-sy);
-			z = lz+((gdnorm.handGyZ/32768.0f)-sz);
-			setRotation(x,y,z);
+			x = lx+((gav.handGyX/32768.0f)-sx);
+			y = ly+((gav.handGyY/32768.0f)-sy);
+			z = lz+((gav.handGyZ/32768.0f)-sz);
+			setRotation(y,x,z);
 			break;
 		case zoom:
 			{gloveData_t gdiff1 = gdiff - gdnorm;
@@ -194,21 +288,27 @@ void doTheThing(void)
 			finger1Tense = (gdiff1.fing1 <= 0 + gdiff.fing1*GLOVETOLERANCE) ? 1 : 0;
 			int finger2Tense;
 			finger2Tense = (gdiff1.fing2 <= 0 + gdiff.fing2*GLOVETOLERANCE) ? 1 : 0;
-			setZoom(finger2Tense-finger1Tense);}
+			setZoom((float)finger2Tense-finger1Tense);}
 			break;
-		case moves:
-			//moveto();
+		case move:
+			px = lpx+((gdnorm.handGyX/32768.0f)-spx);
+			py = lpy+((gdnorm.handGyY/32768.0f)-spy);
+			pz = lpz+((gdnorm.handGyZ/32768.0f)-spz);
+			if(px > py && px > pz){
+				setPan(px,0.0f,0.0f);
+			}
+			else if(py > px && py > pz){
+				setPan(0.0f,py,0.0f);
+			}
+			else if(pz > px && pz > py)
+			{
+				setPan(0.0f,0.0f,pz);
+			}
+//			setPan(px,py,pz);
+			//printData(gd);
 			break;
 		default:
 		break;
-	}
-	if (cMode == rotate){
-
-		setRotation(x,y,z);
-
-	}
-	else{
-
 	}
 }
 
@@ -223,24 +323,13 @@ void clearBuffer(int port){
 }
 
 
-bool parseData(gloveData_t *gd, char* str)
-{
-	int n = sscanf(str, "[%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd]", &(gd->fing1),&(gd->fing2),&(gd->fing3),&(gd->fing4),&(gd->fing5),&(gd->handGyX),&(gd->handGyY),&(gd->handGyZ),&(gd->handTemp),&(gd->handAccX),&(gd->handAccY),&(gd->handAccZ),&(gd->armGyX),&(gd->armGyY),&(gd->armGyZ),&(gd->armTemp),&(gd->armAccX),&(gd->armAccY),&(gd->armAccZ));
-	return n > 0;
-}
 
-void printData(gloveData_t gd){
-
-	printf("%hd, %hd, %hd, %hd, %hd, - , %hd, %hd, %hd\n", gd.fing1, gd.fing2, gd.fing3, gd.fing4, gd.fing5, gd.handGyX, gd.handGyY, gd.handGyZ);
-
-}
 
 void waitForEnter(){
 	char c; scanf("%c", &c);
 }
 
 void acquireData(gloveData_t *gd, bool clear = false){
-/*
 	unsigned char *buf;
 	char *bigBuf;
 	buf = (unsigned char*)malloc(sizeof(unsigned char) * 2);
@@ -268,9 +357,6 @@ void acquireData(gloveData_t *gd, bool clear = false){
 			}
 		}
 	}
-	free(buf);
-	free(bigBuf);
-*/
 }
 
 
@@ -288,7 +374,10 @@ int main(int argc, char **argv)
 	lx = 0;
 	ly = 0;
 	lz = 0;
-	//if (RS232_OpenComport(COMPORT, 9600, "/dev/ttyS1") == 0){
+	px = 0;
+	py = 0;
+	pz = 0;
+	if (RS232_OpenComport(COMPORT, 9600) == 0){
 		cMode = rest;
 
 		printf("connected\n");
@@ -312,10 +401,10 @@ int main(int argc, char **argv)
 		acquireData(&gd,true);
 		setOtherLoop(&mainloop);
 		glMain(argc, argv);
-	//}
-	//else{
-	//	printf("fail\n");
-	//}
+	}
+	else{
+		printf("fail\n");
+	}
 	
 
 	return 0;

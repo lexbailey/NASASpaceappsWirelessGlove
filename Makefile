@@ -1,6 +1,6 @@
-LIBS = -lGL -lGLU -lglut -lm
+LIBS = -lfreeglut  -lGLU32 -lopengl32 -lm
 
-all: glove
+all: glove.exe
 
 
 %.o: %.cpp
@@ -9,5 +9,5 @@ all: glove
 %.o: %.c
 	g++ $^ -c -o $@
 
-glove: glove.o rs232.o gears.o
+glove.exe: glove.o rs232.o gears.o
 	g++ $^ -o $@ ${LIBS}
